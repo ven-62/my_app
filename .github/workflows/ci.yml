@@ -1,39 +1,88 @@
-# This file tells GitHub: "Every time someone pushes code, do these things."
+name: CI/CD Pipeline
 
-name: CI Pipeline           # The name you'll see in the GitHub Actions tab
-
-# WHEN should this run?
 on:
-  push:                     # Run when code is pushed...
-    branches: [main]        # ...to the main branch
-  pull_request:             # Also run on pull requests
+  push:
+    branches: [main]
+  pull_request:
     branches: [main]
 
-# WHAT should it do?
 jobs:
+  # ── JOB 1: Check code quality ──────────────────
   check-code:
     name: Lint and Test
-    runs-on: ubuntu-latest  # Use a Linux machine provided by GitHub
-
+    runs-on: ubuntu-latest
     steps:
-      # Step 1: Download your code onto the runner
       - name: Get the code
         uses: actions/checkout@v4
 
-      # Step 2: Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # Step 3: Install your packages (pip install)
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Step 4: Check code style
       - name: Check code style (lint)
         run: flake8 app/
 
-      # Step 5: Run tests
       - name: Run tests
         run: pytest tests/
+
+  # ── JOB 2: Build Docker image ──────────────────
+  build-docker:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: check-code                    # Runs only if Job 1 passes
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t ghcr.io/${{ github.repository }}:latest .
+          docker push ghcr.io/${{ github.repository }}:latest
+
+  # ── JOB 3: Deploy to server ────────────────────
+  deploy:
+    name: Deploy to Server
+    runs-on: ubuntu-latest
+    needs: build-docker                  # Runs only if Job 2 passes
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            docker pull ghcr.io/${{ github.repository }}:latest
+            docker stop my-app || true
+            docker rm my-app || true
+            docker run -d --name my-app -p 80:5000 ghcr.io/${{ github.repository }}:latest
+            echo "Deployed at $(date)"
+
+      - name: Check if app is running
+        run: |
+          echo "Waiting for app to start..."
+          sleep 15
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://${{ secrets.SERVER_HOST }}/health)
+          if [ "$STATUS" = "200" ]; then
+            echo "App is running!"
+          else
+            echo "Something went wrong. Status: $STATUS"
+            exit 1
+          fi
+
