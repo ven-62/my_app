@@ -27,7 +27,9 @@ jobs:
         run: flake8 app/
 
       - name: Run tests
-        run: pytest tests/
+        run: |
+          export PYTHONPATH=$(pwd)
+          pytest tests/
 
   # ── JOB 2: Build Docker image ──────────────────
   build-docker:
