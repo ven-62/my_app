@@ -1,11 +1,12 @@
-# Use a lightweight official Python image
+# app/Dockerfile or repo-root Dockerfile
+
 FROM python:3.12-slim
 
-# Prevent Python from writing .pyc files and enable logs
+# Prevent .pyc files and enable real-time logs
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# THIS FIXES YOUR IMPORT ERROR
+# Make app package importable
 ENV PYTHONPATH=/app
 
 # Set working directory
@@ -15,8 +16,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the project
-COPY . .
+# Copy application code
+COPY app ./app
 
-# Default command: run tests
-CMD ["pytest"]
+# Expose Flask port
+EXPOSE 5000
+
+# Run Flask app
+CMD ["python", "-m", "app.main"]
